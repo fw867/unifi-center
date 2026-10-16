@@ -1206,14 +1206,24 @@ func TestSocketReadyAndStaleSocket(t *testing.T) {
 		if !SocketReady(path) {
 			t.Error("正在监听的 Socket 应当判定为就绪")
 		}
-		// 有活着的服务时不能删
+		// 先确认服务真的在 accept（有人连得上），这样下面"陈旧"的判断才有意义
+		if conn, dialErr := net.DialTimeout("unix", path, time.Second); dialErr == nil {
+			_ = conn.Close()
+		} else {
+			t.Fatalf("监听中的 Socket 应当连得上：%v", dialErr)
+		}
 		if UnlinkStaleSocket(path) {
 			t.Error("活着服务的 Socket 不应被判定为陈旧并删除")
 		}
-		listener.Close()
-		// 关掉之后就是陈旧的，应能清理
+		// 关掉监听者后，它就成了陈旧 Socket，应当被清理。
+		// 注意：Unix Socket 的 backlog 里可能还留着未被 accept 的连接，所以这里允许
+		// UnlinkStaleSocket 内部重试几次（实现里已经这么做了）。
+		_ = listener.Close()
 		if !UnlinkStaleSocket(path) {
 			t.Error("陈旧 Socket 应当被清理")
+		}
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Error("清理后 Socket 文件应当不存在")
 		}
 	}
 }

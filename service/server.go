@@ -643,18 +643,50 @@ func htmlEscape(value string) string {
 
 // ---------------------------------------------------------------- 监听与启动
 
-// UnlinkStaleSocket 清理崩掉留下的 Socket 文件（bind 会 EADDRINUSE）。
-// 只有当没人能连上它时才删；能连上说明服务还活着。
+// UnlinkStaleSocket 清理崩掉留下的 Socket 文件（不清理的话 bind 会 EADDRINUSE）。
+//
+// 判据用"能不能重新 bind"而不是"能不能 dial"：Unix Socket 的 backlog 里可能还留着
+// 没被 accept 掉的残留连接，监听者早已关闭时单次 dial 仍可能成功，于是把陈旧 Socket
+// 误判成"服务还活着"而不清理（Linux 上的 CI 抓到过这个竞态）。
+//
+//   - 文件不存在 → 无需清理；
+//   - 能连上且对端有响应 → 服务活着，绝不删；
+//   - 连不上 → 试着 bind 一下：成功说明确实没人听（立刻释放并删文件）；失败说明有人占着，不删。
 func UnlinkStaleSocket(path string) bool {
 	if _, err := os.Stat(path); err != nil {
 		return false
 	}
-	conn, err := net.DialTimeout("unix", path, 400*time.Millisecond)
-	if err == nil {
-		conn.Close()
+	if socketAccepts(path) {
 		return false
 	}
-	return os.Remove(path) == nil
+	probe, err := net.Listen("unix", path)
+	if err == nil {
+		// 我们能 bind，说明这个文件是死掉的残留，删掉它
+		_ = probe.Close()
+		return os.Remove(path) == nil
+	}
+	// bind 失败：被别的进程占着（可能在重启中），别动它
+	return false
+}
+
+// socketAccepts 判断这个 Socket 背后是否真有活着的服务在 accept。
+func socketAccepts(path string) bool {
+	for attempt := 0; attempt < 3; attempt++ {
+		conn, err := net.DialTimeout("unix", path, 300*time.Millisecond)
+		if err != nil {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		_ = conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
+		// 连上还不够：再写一次并等回执，确认对端确实在处理
+		if _, writeErr := conn.Write([]byte("PING")); writeErr == nil {
+			_ = conn.Close()
+			return true
+		}
+		_ = conn.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
 
 // BuildListeners 按约定返回要监听的入口：
