@@ -76,6 +76,10 @@ type Env struct {
 	AppRoot     string // 解析出来的"应用文件目录"（可能等于 AppDest，也可能是 AppDest/target）
 	SocketPath  string // <TRIM_APPDEST>/app.sock
 	SocketOnly  bool   // 目标机模式：只监听 Unix Socket（TRIM_APPDEST 存在）
+	// OwnedSocket 表示"这个进程自己成功 bind 了 Socket"。
+	// 不能拿文件存在与否当就绪判据：崩溃残留的 socket 文件同样存在（而且是 socket 类型），
+	// 那样 /ctl/status 会谎报就绪。只有自己 bind 成功才算真的在监听。
+	OwnedSocket bool
 	DevPort     int    // 本机调试用的 TCP 端口（0 表示不监听）
 	DefaultTarg string // ROUTER_TARGET
 	GatewayPfx  string // GATEWAY_PREFIX，默认 /app/<appname>
@@ -706,7 +710,9 @@ func AssetsPresent(uiDir string) map[string]bool {
 	return result
 }
 
-func SocketReady(path string) bool {
+// socketFilePresent 只回答"路径上有没有 socket 文件"，**不代表有人在监听**：
+// 进程被 kill -9 之后会留下这种文件。就绪判据请用 Service.Env.OwnedSocket。
+func socketFilePresent(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode()&os.ModeSocket != 0
 }

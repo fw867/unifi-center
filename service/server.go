@@ -95,7 +95,9 @@ func (s *Service) StatusPayload(user GatewayUser) map[string]any {
 		"router":         ProbeRouter(s.ProbeHTTP, target, token),
 		"gateway_prefix": s.prefix(),
 		"socket_path":    s.Env.SocketPath,
-		"socket_ready":   SocketReady(s.Env.SocketPath),
+		// OwnedSocket：自己 bind 成功才算就绪（不能看文件在不在，残留文件会骗人）
+		"socket_ready":   s.Env.OwnedSocket,
+		"socket_present": socketFilePresent(s.Env.SocketPath),
 		"app_dest":       s.Env.AppDest,
 		"app_root":       s.Env.AppRoot,
 		"ui_dir":         s.Env.UIDir,
@@ -685,6 +687,7 @@ func (s *Service) BuildListeners() ([]net.Listener, error) {
 		}
 		// 网关以系统身份连接，Socket 需要可写
 		_ = os.Chmod(s.Env.SocketPath, 0o666)
+		s.Env.OwnedSocket = true
 		s.Logger.Printf("已监听 Unix Socket %s（fnOS 统一网关目标）", s.Env.SocketPath)
 		listeners = append(listeners, listener)
 	}
