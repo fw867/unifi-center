@@ -129,8 +129,15 @@ function renderStatus(payload) {
     ? (router.authenticated ? '已保存且有效' : '已保存（未验证）')
     : '未保存', payload.token_set ? 'ok' : 'warn');
   addRow(list, '网关前缀', payload.gateway_prefix || '—');
-  addRow(list, 'Unix Socket', payload.socket_ready ? `${payload.socket_path}（已就绪）` : `${payload.socket_path}（不存在）`,
-    payload.socket_ready ? 'ok' : 'warn');
+  // socket_ready 表示"本进程自己 bind 成功"；socket_present 只表示路径上有文件
+  // —— 崩溃残留也会有文件，那种情况不能显示成"已就绪"
+  if (payload.socket_ready) {
+    addRow(list, 'Unix Socket', `${payload.socket_path}（已监听）`, 'ok');
+  } else if (payload.socket_present) {
+    addRow(list, 'Unix Socket', `${payload.socket_path}（有残留文件，但本进程没在监听）`, 'bad');
+  } else {
+    addRow(list, 'Unix Socket', `${payload.socket_path}（不存在）`, 'warn');
+  }
   addRow(list, '配置目录', payload.config_dir || '—');
   addRow(list, '当前身份', ((payload.user || {}).label || '—')
     + ((payload.user || {}).is_admin ? '（管理员）' : '（只读）'));
