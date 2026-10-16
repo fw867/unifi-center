@@ -1,0 +1,33 @@
+[
+  {
+    "stepTitle": "unifi 软件中心",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "本应用把局域网里路由器上的软件中心（UniFi SoftCenter 等插件中心）经飞牛 NAS 转发出来，因此不需要给路由器做端口映射。以下两项可以先留空，装好后在应用页面的设置里随时修改。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_router_target",
+        "label": "路由器软件中心地址",
+        "initValue": "http://192.168.1.1:9958/",
+        "rules": [
+          {
+            "pattern": "^$|^https?://[A-Za-z0-9.\\-]+(:[0-9]{1,5})?/?$",
+            "message": "请填 http://主机:端口/ 形式，例如 http://192.168.1.1:9958/"
+          }
+        ]
+      },
+      {
+        "type": "password",
+        "field": "wizard_router_token",
+        "label": "软件中心 AdminToken（可留空）",
+        "rules": []
+      },
+      {
+        "type": "tips",
+        "helpText": "AdminToken 会保存在 NAS 的应用配置目录（权限 0600），打开软件中心时自动注入，不用每次输入。它等同于路由器的高权限凭据，请使用强随机值，并且不要给路由器端口做公网映射。"
+      }
+    ]
+  }
+]

@@ -1,0 +1,180 @@
+name: build
+
+# 触发规则：
+#   · 任何 push / PR  → 编译 + 测试（不发布）
+#   · 推送到 main，且**最新提交的标题里带 [release]** → 额外发布 Release，
+#     并把两个架构的 .fpk 作为附件
+#   · 手动触发（workflow_dispatch）→ 勾 force_release 也能发布
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: '本次手动运行直接发布 Release（只对 main 上的提交有意义）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 发布标记：提交标题（subject）里出现这个字符串就发布
+  RELEASE_MARKER: '[release]'
+
+jobs:
+  build:
+    name: 编译与测试
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.marker.outputs.should_release }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: service/go.mod
+          cache-dependency-path: service/go.sum
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: 判断是否需要发布
+        id: marker
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMIT_SUBJECT: ${{ github.event.head_commit.message }}
+          FORCE_RELEASE: ${{ inputs.force_release }}
+        run: |
+          set -eu
+          subject="$(printf '%s' "$COMMIT_SUBJECT" | head -n1)"
+          echo "提交标题：$subject"
+          should="false"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "${FORCE_RELEASE:-false}" = "true" ]; then
+            echo "手动触发且勾选了发布"
+            should="true"
+          elif [ "$EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ] \
+               && printf '%s' "$subject" | grep -qF "$RELEASE_MARKER"; then
+            echo "标题里含 $RELEASE_MARKER，将发布"
+            should="true"
+          fi
+          echo "should_release=$should" >> "$GITHUB_OUTPUT"
+
+      - name: 解析版本号与 tag
+        id: version
+        run: |
+          set -eu
+          version="$(sed -n 's/^version[[:space:]]*=[[:space:]]*//p' manifest | head -n1 | tr -d '\r')"
+          [ -n "$version" ] || { echo "manifest 里没有 version" >&2; exit 1; }
+          tag="v$version"
+          # 同一个版本要再发一次时，递增 -r2 / -r3 …（与 fnOS 社区惯例一致）
+          if git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
+            revision=2
+            while git ls-remote --tags origin "refs/tags/$tag-r$revision" | grep -q .; do
+              revision=$((revision + 1))
+            done
+            tag="$tag-r$revision"
+            echo "v$version 已存在，本次使用 tag $tag"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "版本 $version → tag $tag"
+
+      - name: go vet
+        working-directory: service
+        run: go vet ./...
+
+      - name: go test
+        working-directory: service
+        run: go test -count=1 ./...
+
+      - name: 构建两个架构的 .fpk
+        run: bash deploy/build.sh
+
+      - name: 校验产物
+        run: |
+          set -eu
+          ls -l dist/*.fpk
+          for fpk in dist/*.fpk; do
+            # 包内不能有 app/ 这一层，且二进制要带可执行位（装到设备上要直接跑）
+            python3 tools/verify_fpk.py "$fpk"
+          done
+
+      - name: 冒烟测试（真跑二进制 + Unix Socket）
+        run: |
+          set -eu
+          bash tools/smoke.sh dist/unificenter-*-x86.fpk
+
+      - name: 上传 .fpk
+        uses: actions/upload-artifact@v4
+        with:
+          name: fpk-packages
+          path: dist/*.fpk
+          if-no-files-found: error
+
+  release:
+    name: 发布 Release
+    needs: build
+    if: needs.build.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: fpk-packages
+          path: dist
+
+      - name: 生成 Release
+        uses: softprops/action-gh-release@v2
+        env:
+          TAG_NAME: ${{ needs.build.outputs.tag }}
+          APP_VERSION: ${{ needs.build.outputs.version }}
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: unifi 软件中心 ${{ needs.build.outputs.version }}
+          body: |
+            ## unifi 软件中心 ${{ needs.build.outputs.version }}
+
+            把路由器上的软件中心（UniFi SoftCenter / KoolCenter 类插件中心）搬进飞牛 fnOS。
+            服务端是静态编译的 Go 二进制，**不依赖 Python / Node 等任何运行时**。
+
+            ### 安装
+
+            按设备 CPU 架构选对应的包（x86_64 选 x86，ARM64 选 arm，装错会起不来）：
+
+            ```bash
+            appcenter-cli install-fpk unificenter-${{ needs.build.outputs.version }}-x86.fpk
+            appcenter-cli start unificenter
+            ```
+
+            也可以在 fnOS「应用中心 → 手动安装」里选这个 `.fpk`。装好后从桌面
+            「unifi 软件中心」图标打开。
+
+            ### 附件
+
+            | 文件 | 架构 | 适用设备 |
+            | --- | --- | --- |
+            | `unificenter-${{ needs.build.outputs.version }}-x86.fpk` | `platform=x86` | x86_64 设备 |
+            | `unificenter-${{ needs.build.outputs.version }}-arm.fpk` | `platform=arm` | ARM64 设备 |
+
+            详细说明见仓库 README。
+          files: dist/*.fpk
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false

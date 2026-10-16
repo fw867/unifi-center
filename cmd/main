@@ -1,0 +1,192 @@
+#!/bin/bash
+# 路由器软件中心（fnOS 移植版）· 运行控制
+#
+# 服务端是随包分发的静态编译二进制（<应用目录>/bin/unifi-center），
+# 目标机不需要任何运行时：没有 Python、没有 Node、也没有依赖应用。
+#
+# 关于路径：官方文档写 TRIM_APPDEST 是"已安装应用的 target 目录"，但**实测有设备把它指到
+# 应用根目录**（target 的上一级）。所以这里不假设 layout，而是列出候选、挑真正有
+# bin/unifi-center 的那个用；Socket 则严格跟着 TRIM_APPDEST 走（网关按它找 socket，
+# 放别处会导致桌面入口 502）。
+#
+# 退出码约定：status 运行返回 0、未运行返回 3；其它失败返回 1。
+
+set -u
+
+APPNAME="${TRIM_APPNAME:-unificenter}"
+APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
+PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
+PKGTMP="${TRIM_PKGTMP:-/var/apps/$APPNAME/tmp}"
+LOGFILE="${TRIM_TEMP_LOGFILE:-/dev/null}"
+
+BINARY_NAME=unifi-center
+SOCKET="$APPDEST/app.sock"
+PIDFILE="$PKGVAR/run/unifi-center.pid"
+SERVICE_LOG="$PKGVAR/unifi-center.out"
+
+mkdir -p "$PKGVAR/run" "$PKGTMP" 2>/dev/null
+
+fail() {
+  echo "$1" > "$LOGFILE" 2>/dev/null
+  echo "[unifi-center] $1" >&2
+  exit 1
+}
+
+# 应用文件目录的候选（去重、保持顺序）
+app_candidates() {
+  {
+    printf '%s\n' "$APPDEST"
+    printf '%s\n' "$APPDEST/target"
+    printf '%s\n' "/var/apps/$APPNAME/target"
+    printf '%s\n' "/var/apps/$APPNAME"
+  } | awk 'NF && !seen[$0]++'
+}
+
+# 选出真正放着二进制的那个目录
+resolve_app_root() {
+  for candidate in $(app_candidates); do
+    if [ -x "$candidate/bin/$BINARY_NAME" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  for candidate in $(app_candidates); do
+    if [ -f "$candidate/ui/config" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' "$APPDEST"
+}
+
+describe_layout() {
+  local lines=""
+  for candidate in $(app_candidates); do
+    local marks=""
+    [ -x "$candidate/bin/$BINARY_NAME" ] && marks="$marks bin"
+    [ -f "$candidate/ui/config" ] && marks="$marks ui"
+    [ -S "$candidate/app.sock" ] && marks="$marks sock"
+    lines="$lines $candidate[$marks ]"
+  done
+  printf '%s' "$lines"
+}
+
+running_pid() {
+  [ -s "$PIDFILE" ] || return 1
+  pid="$(cat "$PIDFILE" 2>/dev/null)"
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  echo "$pid"
+}
+
+wait_for_socket() {
+  # 最多等 10 秒（100 × 0.1s），Socket 出现即认为启动成功
+  i=0
+  while [ "$i" -lt 100 ]; do
+    [ -S "$SOCKET" ] && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+case "${1:-}" in
+  start)
+    APP_ROOT="$(resolve_app_root)"
+    BIN="$APP_ROOT/bin/$BINARY_NAME"
+    if [ ! -x "$BIN" ]; then
+      fail "找不到可执行文件 $BINARY_NAME。已试过：$(describe_layout)（安装不完整或架构不对，请重新安装）"
+    fi
+    if pid="$(running_pid)"; then
+      echo "[unifi-center] 服务已在运行（pid $pid）"
+      exit 0
+    fi
+    # 清理崩溃留下的陈旧 Socket / PID
+    [ -S "$SOCKET" ] && rm -f "$SOCKET"
+    rm -f "$PIDFILE"
+
+    export TRIM_APPDEST="$APPDEST"
+    export TRIM_PKGETC="$PKGETC"
+    export TRIM_PKGVAR="$PKGVAR"
+    export TRIM_PKGTMP="$PKGTMP"
+    export TRIM_APPNAME="$APPNAME"
+    export TRIM_TEMP_LOGFILE="${TRIM_TEMP_LOGFILE:-}"
+    [ -d "$APP_ROOT/ui" ] && export UI_DIR="$APP_ROOT/ui"
+    export TERM=dumb
+
+    nohup "$BIN" serve >>"$SERVICE_LOG" 2>&1 &
+    echo $! > "$PIDFILE"
+
+    if ! wait_for_socket; then
+      echo "服务启动失败：没有在 $SOCKET 上监听到 Socket（应用目录 $APP_ROOT）。最近日志：$(tail -n 5 "$SERVICE_LOG" 2>/dev/null | tr '\n' ' ')" > "$LOGFILE"
+      kill "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+      rm -f "$PIDFILE"
+      exit 1
+    fi
+    echo "[unifi-center] 已启动（pid $(cat "$PIDFILE")，应用目录 $APP_ROOT，Socket $SOCKET）"
+    exit 0
+    ;;
+
+  stop)
+    if pid="$(running_pid)"; then
+      kill "$pid" 2>/dev/null
+      i=0
+      while [ "$i" -lt 50 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.1
+        i=$((i + 1))
+      done
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+        sleep 0.2
+      fi
+      echo "[unifi-center] 已停止（pid $pid）"
+    else
+      echo "[unifi-center] 服务未在运行"
+    fi
+    rm -f "$PIDFILE"
+    [ -S "$SOCKET" ] && rm -f "$SOCKET"
+    exit 0
+    ;;
+
+  status)
+    # 0 = 正在运行；3 = 未运行
+    if pid="$(running_pid)"; then
+      if [ -S "$SOCKET" ]; then
+        exit 0
+      fi
+      # 进程在、Socket 不在：可能正在启动，稍等一轮再判
+      sleep 0.5
+      [ -S "$SOCKET" ] && exit 0
+      echo "[unifi-center] 进程 $pid 在运行，但没有 $SOCKET" >&2
+      exit 3
+    fi
+    exit 3
+    ;;
+
+  doctor)
+    # 排障用：把环境变量、候选布局、二进制与 Socket 状态全打出来
+    echo "TRIM_APPNAME=$APPNAME"
+    echo "TRIM_APPDEST=$APPDEST"
+    echo "TRIM_PKGETC=$PKGETC"
+    echo "TRIM_PKGVAR=$PKGVAR"
+    echo "TRIM_PKGTMP=$PKGTMP"
+    echo "解析出的应用目录：$(resolve_app_root)"
+    echo "Socket：$SOCKET"
+    echo "候选布局：$(describe_layout)"
+    echo "二进制：$(resolve_app_root)/bin/$BINARY_NAME"
+    if pid="$(running_pid)"; then echo "进程：$pid"; else echo "进程：未运行"; fi
+    if [ -f "$PKGVAR/unifi-center.out" ]; then
+      echo "--- 最近日志 ---"
+      tail -n 20 "$PKGVAR/unifi-center.out"
+    fi
+    exit 0
+    ;;
+
+  *)
+    echo "用法：$0 {start|stop|status|doctor}" >&2
+    exit 1
+    ;;
+esac

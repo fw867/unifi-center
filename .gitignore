@@ -1,0 +1,21 @@
+# 构建产物
+dist/
+*.fpk
+# 交叉编译出来的二进制由 deploy/build.* 在打包时生成，不入库
+app/bin/
+
+# 本机调试与运行时数据
+.dev/
+__pycache__/
+*.pyc
+*.log
+
+# 编辑器与系统垃圾（fnpack 不会剔除这些，构建脚本会先清理）
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Windows �������� go build ����ʱ����
+service/unifi-center.exe
+*.exe

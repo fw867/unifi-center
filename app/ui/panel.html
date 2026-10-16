@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="format-detection" content="telephone=no">
+<link rel="icon" href="../assets/icon.png">
+<title>unifi 软件中心 · 设置</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body class="rc-body">
+<header class="rc-bar">
+  <span class="rc-dot" id="statusDot" aria-hidden="true"></span>
+  <div class="rc-brand">
+    <strong id="brandTitle">unifi 软件中心</strong>
+    <small id="brandSub">正在探测…</small>
+  </div>
+  <span class="rc-meta" id="routerMeta"></span>
+  <div class="rc-actions" id="panelActions">
+    <a class="rc-btn is-primary" id="openCenter" href="../">打开软件中心</a>
+  </div>
+</header>
+
+<main class="rc-panel">
+  <section class="rc-card" id="permCard">
+    <h2>权限</h2>
+    <p class="rc-banner" id="permNote">正在确认当前身份…</p>
+  </section>
+
+  <section class="rc-card">
+    <h2>连接</h2>
+    <label class="rc-field">
+      <span>路由器软件中心地址</span>
+      <input id="targetInput" type="text" autocomplete="off" spellcheck="false"
+             placeholder="http://192.168.1.1:9958/">
+    </label>
+    <label class="rc-field">
+      <span>AdminToken（保存在 NAS 应用配置目录，权限 0600；打开软件中心时自动注入，不用每次输入）</span>
+      <input id="tokenInput" type="password" autocomplete="off" spellcheck="false"
+             placeholder="留空表示不保存">
+    </label>
+    <div class="rc-inline">
+      <button class="rc-btn" id="revealToken" type="button">显示已保存的令牌</button>
+      <button class="rc-btn is-danger hidden" id="clearToken" type="button">清除令牌</button>
+    </div>
+    <p class="rc-muted" id="tokenNote"></p>
+    <p class="rc-error hidden" id="settingsError"></p>
+    <p class="rc-muted" id="settingsHint">改地址会立刻生效（路由器接口由本应用转发，不改动任何系统配置）。
+      明文令牌只对已登录的 fnOS 管理员可见，普通用户与局域网直连只能替换、看不到原值。</p>
+    <div class="rc-card-actions">
+      <button class="rc-btn is-primary" id="saveSettings" type="button">保存</button>
+      <button class="rc-btn" id="refreshStatus" type="button">重新探测</button>
+    </div>
+  </section>
+
+  <section class="rc-card">
+    <h2>状态</h2>
+    <dl class="rc-kv" id="statusList"></dl>
+  </section>
+
+  <section class="rc-card">
+    <h2>本地资源 <small id="assetsNote"></small></h2>
+    <dl class="rc-kv" id="assetList"></dl>
+  </section>
+
+  <section class="rc-card">
+    <h2>最近日志</h2>
+    <pre class="rc-logs" id="logBox">（暂无日志）</pre>
+    <div class="rc-card-actions">
+      <button class="rc-btn" id="refreshLogs" type="button">刷新日志</button>
+    </div>
+  </section>
+
+  <section class="rc-card">
+    <h2>说明</h2>
+    <p class="rc-muted">本应用把局域网里路由器上的软件中心（UniFi SoftCenter / KoolCenter 等插件中心）
+      经 NAS 转发到飞牛 fnOS 的桌面入口：在 fnOS 里就能装插件、看日志、改定时任务，
+      <strong>不需要给路由器做端口映射</strong>。</p>
+    <p class="rc-muted">软件中心页面里的 Vue / Tailwind / Lucide 已换成本地副本，页面里对 GitHub
+      的直连也改走 NAS 转发，因此在只能访问 NAS 域名、访问不了外网的环境里同样能正常显示。</p>
+    <p class="rc-muted">转发时按三条规则决定 <code>Authorization</code>：客户端自己带的真实令牌原样透传；
+      控制台那一跳塞的占位值 <code>Bearer console-loopback</code> 换成本应用保存的令牌；
+      完全没带凭据时也用保存的令牌顶上（都没保存才不带，让软件中心照实报 401）。</p>
+  </section>
+</main>
+
+<div class="rc-toast hidden" id="toast"></div>
+<script src="../assets/close.js" data-mode="back" defer></script>
+<script src="panel.js"></script>
+</body>
+</html>

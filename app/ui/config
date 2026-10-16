@@ -1,0 +1,17 @@
+{
+  ".url": {
+    "unificenter.main": {
+      "title": "unifi 软件中心",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/unificenter",
+      "gatewaySocket": "app.sock",
+      "url": "/app/unificenter/",
+      "allUsers": true,
+      "control": {
+        "accessPerm": "readonly"
+      }
+    }
+  }
+}

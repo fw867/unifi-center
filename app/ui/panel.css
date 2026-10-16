@@ -1,0 +1,207 @@
+/* 路由器软件中心（fnOS 移植版）外壳样式。
+   配色跟随飞牛 fnOS 的中性黑白 + 主题蓝，深浅色自适应，左侧留出关闭按钮的位置。 */
+
+:root {
+  --bg: #f4f6f9;
+  --panel: #ffffff;
+  --line: #e4e8ef;
+  --text: #1c2430;
+  --muted: #6b7889;
+  --accent: #2f6fed;
+  --accent-soft: rgba(47, 111, 237, .12);
+  --ok: #16a34a;
+  --bad: #d33a2c;
+  --warn: #b45309;
+  --shadow: 0 18px 48px rgba(15, 23, 42, .22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181f;
+    --panel: #1c222c;
+    --line: #2b3441;
+    --text: #e8ecf3;
+    --muted: #93a1b4;
+    --accent: #6f9bff;
+    --accent-soft: rgba(111, 155, 255, .16);
+    --ok: #4ade80;
+    --bad: #f87171;
+    --warn: #fbbf24;
+    --shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.rc-body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* ---------- 顶栏 ---------- */
+.rc-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px max(46px, env(safe-area-inset-left, 0px));
+  min-height: 52px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+
+.rc-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #c3cad6; flex: 0 0 auto;
+}
+.rc-dot.is-ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(22, 163, 74, .16); }
+.rc-dot.is-bad { background: var(--bad); box-shadow: 0 0 0 4px rgba(211, 58, 44, .16); }
+
+.rc-brand { min-width: 0; display: flex; flex-direction: column; }
+.rc-brand strong { font-size: 14.5px; font-weight: 650; line-height: 1.2; }
+.rc-brand small {
+  font-size: 11.5px; color: var(--muted); line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw;
+}
+
+.rc-meta {
+  margin-left: auto;
+  min-width: 0;
+  font-size: 11.5px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 34vw;
+}
+
+.rc-actions { display: flex; gap: 6px; flex: 0 1 auto; min-width: 0; }
+
+.rc-btn {
+  min-height: 32px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel); color: var(--text);
+  font: inherit; font-size: 13px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  text-decoration: none; white-space: nowrap;
+}
+.rc-btn:hover { background: var(--accent-soft); }
+.rc-btn:active { transform: scale(.97); }
+.rc-btn[disabled] { opacity: .5; cursor: default; }
+.rc-btn.is-primary { border-color: var(--accent); color: var(--accent); }
+.rc-btn.is-danger { border-color: var(--bad); color: var(--bad); }
+
+/* ---------- 主体 ---------- */
+.rc-main { position: relative; flex: 1 1 auto; min-height: 0; }
+
+.rc-frame { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+
+.rc-panel {
+  flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto;
+  padding: 16px max(16px, env(safe-area-inset-right, 0px))
+           calc(24px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  display: flex; flex-direction: column; gap: 14px;
+  max-width: 760px; width: 100%; margin: 0 auto;
+}
+
+/* 卡片一律允许收缩：窄窗口（外壳大小不可控）下不能让内容顶宽整个文档 */
+.rc-panel > * { min-width: 0; }
+
+.rc-card {
+  width: 100%; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, .05);
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 12px;
+  overflow-wrap: anywhere;
+}
+.rc-card h2 { margin: 0; font-size: 15.5px; }
+.rc-card h2 small { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+
+.rc-kv { display: grid; grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 7px 14px; margin: 0; font-size: 13.5px; }
+.rc-kv dt { color: var(--muted); }
+.rc-kv dd { margin: 0; word-break: break-all; min-width: 0; }
+.rc-kv dd.is-ok { color: var(--ok); }
+.rc-kv dd.is-bad { color: var(--bad); }
+.rc-kv dd.is-warn { color: var(--warn); }
+
+.rc-field { display: flex; flex-direction: column; gap: 6px; }
+.rc-field span { font-size: 12.5px; color: var(--muted); }
+.rc-field input {
+  font: inherit; font-size: 14.5px; min-height: 40px;
+  padding: 9px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  width: 100%;
+}
+.rc-field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rc-field input[disabled] { opacity: .6; }
+
+.rc-inline { display: flex; gap: 8px; align-items: center; }
+.rc-inline input { flex: 1 1 auto; }
+
+.rc-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+
+.rc-muted { color: var(--muted); font-size: 12.5px; margin: 0; }
+.rc-error { margin: 0; color: var(--bad); font-size: 12.5px; }
+.rc-ok { margin: 0; color: var(--ok); font-size: 12.5px; }
+
+.rc-logs {
+  margin: 0; max-height: 220px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-all; color: var(--muted);
+}
+
+.rc-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  font-size: 11.5px; border: 1px solid var(--line); color: var(--muted);
+}
+
+.rc-banner {
+  border: 1px solid var(--line); border-left: 3px solid var(--warn);
+  border-radius: 10px; padding: 10px 12px; font-size: 12.5px; color: var(--muted);
+  background: var(--bg);
+}
+
+.rc-toast {
+  position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 60; padding: 10px 18px; border-radius: 12px;
+  background: rgba(16, 20, 32, .92); color: #fff; font-size: 13.5px;
+  box-shadow: var(--shadow); max-width: 80vw; text-align: center;
+}
+.rc-toast.is-error { background: rgba(150, 30, 26, .94); }
+
+.hidden { display: none !important; }
+
+/* 窗口不够大时收紧留白：fnOS 的窗口大小由外壳决定，面板要能自适应任何尺寸 */
+@media (max-height: 760px) {
+  .rc-panel { gap: 10px; padding-top: 12px; }
+  .rc-card { padding: 14px; gap: 10px; }
+  .rc-kv { gap: 4px 12px; }
+  .rc-logs { max-height: 150px; }
+}
+
+@media (max-width: 560px) {
+  .rc-meta { display: none; }
+  .rc-brand small { max-width: 58vw; }
+  .rc-bar { padding-left: max(42px, env(safe-area-inset-left, 0px)); }
+}
+
+@media (max-width: 420px) {
+  .rc-actions { gap: 4px; }
+  .rc-btn { padding: 0 9px; font-size: 12.5px; }
+  .rc-panel { padding-left: 12px; padding-right: 12px; }
+  .rc-kv { grid-template-columns: 1fr; gap: 2px; }
+  .rc-kv dt { margin-top: 6px; }
+}

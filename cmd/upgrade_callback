@@ -1,0 +1,24 @@
+#!/bin/bash
+# 升级后：迁移历史配置（幂等）并把服务重新拉起来。
+set -u
+
+APPNAME="${TRIM_APPNAME:-unificenter}"
+APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
+PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# 应用文件目录：TRIM_APPDEST 在不同设备上可能指向应用根目录或它的 target 子目录
+BIN=""
+for candidate in "$APPDEST" "$APPDEST/target" "/var/apps/$APPNAME/target" "/var/apps/$APPNAME"; do
+  if [ -x "$candidate/bin/unifi-center" ]; then BIN="$candidate/bin/unifi-center"; break; fi
+done
+
+# 老版本（xiaomi-router-center 插件）把设置放在 /data/plugin/router-center/，
+# 若本应用还没有配置而那边有，就搬过来（只读旧目录，不删它）
+if [ -n "$BIN" ]; then
+  TRIM_PKGETC="$PKGETC" TRIM_APPDEST="$APPDEST" TRIM_APPNAME="$APPNAME" \
+    "$BIN" migrate-legacy >/dev/null 2>&1 || true
+fi
+
+"$DIR/main" start
+exit $?

@@ -1,0 +1,6 @@
+#!/bin/bash
+# 升级前：停掉服务（Socket 会被删掉，升级后由回调重新拉起）。
+set -u
+DIR="$(cd "$(dirname "$0")" && pwd)"
+"$DIR/main" stop >/dev/null 2>&1
+exit 0

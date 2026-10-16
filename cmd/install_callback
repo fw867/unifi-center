@@ -1,0 +1,39 @@
+#!/bin/bash
+# 安装文件之后：把安装向导里填的地址 / 令牌写进应用配置目录（可重复执行）。
+#
+# 向导字段会以同名环境变量提供给本脚本（不带 TRIM_ 前缀）：
+#   wizard_router_target  路由器软件中心地址，例如 http://192.168.1.1:9958/
+#   wizard_router_token   AdminToken（password 字段，留空表示不修改）
+set -u
+
+APPNAME="${TRIM_APPNAME:-unificenter}"
+APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
+PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+LOGFILE="${TRIM_TEMP_LOGFILE:-/dev/null}"
+
+# 应用文件目录：TRIM_APPDEST 在不同设备上可能指向应用根目录或它的 target 子目录
+BIN=""
+for candidate in "$APPDEST" "$APPDEST/target" "/var/apps/$APPNAME/target" "/var/apps/$APPNAME"; do
+  if [ -x "$candidate/bin/unifi-center" ]; then BIN="$candidate/bin/unifi-center"; break; fi
+done
+
+mkdir -p "$PKGETC" || { echo "无法创建配置目录：$PKGETC" > "$LOGFILE"; exit 1; }
+chmod 700 "$PKGETC" 2>/dev/null
+
+if [ -z "$BIN" ]; then
+  # 没有二进制不算致命：服务起不来时 cmd/main 会给出明确提示
+  echo "[unifi-center] 未找到可执行文件（试过 $APPDEST、$APPDEST/target），跳过向导写入" >&2
+  exit 0
+fi
+
+TRIM_PKGETC="$PKGETC" \
+TRIM_APPDEST="$APPDEST" \
+TRIM_APPNAME="$APPNAME" \
+TRIM_TEMP_LOGFILE="${TRIM_TEMP_LOGFILE:-}" \
+wizard_router_target="${wizard_router_target:-}" \
+wizard_router_token="${wizard_router_token:-}" \
+"$BIN" seed || {
+  echo "写入向导配置失败：请检查地址格式（示例 http://192.168.1.1:9958/）与存储空间是否可写" > "$LOGFILE"
+  exit 1
+}
+exit 0

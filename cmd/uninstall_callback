@@ -1,0 +1,21 @@
+#!/bin/bash
+# 卸载清理后：按向导里的选择决定是否连带删除 NAS 上保存的设置与 AdminToken。
+#
+#   wizard_purge_data=purge → 删除；其它值（含未提供）→ 保留。
+#
+# 只碰本应用自己的配置目录，不动路由器、不动共享目录、不动其它应用的数据。
+set -u
+
+APPNAME="${TRIM_APPNAME:-unificenter}"
+PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+
+case "${wizard_purge_data:-keep}" in
+  purge)
+    rm -f "$PKGETC/settings.json" "$PKGETC/router-token" "$PKGETC/unifi-center.log"* 2>/dev/null
+    echo "[unifi-center] 已按选择删除 NAS 上保存的设置与 AdminToken"
+    ;;
+  *)
+    echo "[unifi-center] 已保留 NAS 上保存的设置与 AdminToken（重装后可直接复用）"
+    ;;
+esac
+exit 0

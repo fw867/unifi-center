@@ -1,0 +1,28 @@
+[
+  {
+    "stepTitle": "卸载",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "卸载本应用不会改动路由器上的任何设置。是否需要一并删除 NAS 上保存的连接设置与 AdminToken，请在下面选择。"
+      },
+      {
+        "type": "radio",
+        "field": "wizard_purge_data",
+        "label": "NAS 上保存的配置",
+        "initValue": "keep",
+        "options": [
+          {
+            "label": "保留（推荐：重新安装后不用再填地址与令牌）",
+            "value": "keep"
+          },
+          {
+            "label": "删除（连同 AdminToken 一起清掉）",
+            "value": "purge"
+          }
+        ],
+        "rules": []
+      }
+    ]
+  }
+]

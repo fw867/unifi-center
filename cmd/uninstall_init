@@ -1,0 +1,6 @@
+#!/bin/bash
+# 卸载前：停服务、清 Socket 与运行文件。用户数据是否删除由 uninstall_callback 处理。
+set -u
+DIR="$(cd "$(dirname "$0")" && pwd)"
+"$DIR/main" stop >/dev/null 2>&1
+exit 0

@@ -1,0 +1,29 @@
+[
+  {
+    "stepTitle": "连接设置",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "这里填的地址与令牌会写入应用配置目录，保存后服务自动重载。也可以直接在应用页面的设置面板里改。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_router_target",
+        "label": "路由器软件中心地址",
+        "initValue": "",
+        "rules": [
+          {
+            "pattern": "^$|^https?://[A-Za-z0-9.\\-]+(:[0-9]{1,5})?/?$",
+            "message": "请填 http://主机:端口/ 形式，例如 http://192.168.1.1:9958/"
+          }
+        ]
+      },
+      {
+        "type": "password",
+        "field": "wizard_router_token",
+        "label": "软件中心 AdminToken（留空表示不修改）",
+        "rules": []
+      }
+    ]
+  }
+]

@@ -1,0 +1,4 @@
+#!/bin/bash
+# 配置变更前：只做检查，真正的写入在 config_callback 里完成。
+set -u
+exit 0

@@ -1,0 +1,11 @@
+[
+  {
+    "stepTitle": "升级",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "升级不会改动路由器上的任何设置，NAS 上保存的连接设置与 AdminToken 会原样保留。"
+      }
+    ]
+  }
+]
