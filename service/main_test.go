@@ -107,12 +107,17 @@ func writeJSONResponse(w http.ResponseWriter, status int, payload any) {
 }
 
 // listenUnix 只在支持 Unix Socket 的平台上可用（Windows 上相关用例会被跳过）。
-func listenUnix(path string) (io.Closer, error) {
+func listenUnix(path string) (*net.UnixListener, error) {
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, err
 	}
-	return listener, nil
+	unixListener, ok := listener.(*net.UnixListener)
+	if !ok {
+		_ = listener.Close()
+		return nil, fmt.Errorf("不是 UnixListener：%T", listener)
+	}
+	return unixListener, nil
 }
 
 // ---------------------------------------------------------------- 测试环境
@@ -1194,6 +1199,8 @@ func TestLoadEnv(t *testing.T) {
 func TestSocketReadyAndStaleSocket(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "app.sock")
+
+	// 文件不存在
 	if SocketReady(path) {
 		t.Error("不存在的 Socket 不应判定为就绪")
 	}
@@ -1204,7 +1211,7 @@ func TestSocketReadyAndStaleSocket(t *testing.T) {
 		return
 	}
 
-	// 1) 有活着的监听者：绝不能删
+	// 1) 有活着的监听者：绝不能删（这是最重要的一条——删了会把正在跑的服务弄坏）
 	listener, err := listenUnix(path)
 	if err != nil {
 		t.Fatalf("创建测试 Socket 失败：%v", err)
@@ -1218,22 +1225,30 @@ func TestSocketReadyAndStaleSocket(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("活着服务的 Socket 文件不该被删掉：%v", err)
 	}
-
-	// 2) 监听者关闭后：应当能清理；若内核还没释放绑定，则必须"没有删但服务仍活着"，
-	//    不能出现"既没删、也确认过没人听"以外的第三种状态。
 	_ = listener.Close()
-	removed := UnlinkStaleSocket(path)
-	if removed {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Error("报告清理成功但文件还在")
-		}
-		return
+
+	// 2) 进程被 kill -9 会留下"没人监听、但文件还在"的 Socket（内核已释放绑定）。
+	//    用 SetUnlinkOnClose(false) 精确造出这个状态——这也是应用真正会遇到的那种残留。
+	residue := filepath.Join(dir, "residue.sock")
+	leftover, err := listenUnix(residue)
+	if err != nil {
+		t.Fatalf("创建残留 Socket 失败：%v", err)
 	}
-	// 没删掉：那就必须真的还有东西在监听（用 bind 探测不出，说明内核还认为绑定存在）
-	probe, probeErr := net.Listen("unix", path)
-	if probeErr == nil {
-		_ = probe.Close()
-		t.Error("既没清理，也能成功 bind —— 说明这段逻辑没有正确识别陈旧 Socket")
+	leftover.SetUnlinkOnClose(false)
+	if err := leftover.Close(); err != nil {
+		t.Fatalf("关闭监听者失败：%v", err)
+	}
+	if _, err := os.Stat(residue); err != nil {
+		t.Fatalf("预期留下残留 Socket 文件，实际：%v", err)
+	}
+	if SocketReady(residue) {
+		t.Error("没人监听的残留 Socket 不该判定为就绪")
+	}
+	if !UnlinkStaleSocket(residue) {
+		t.Error("残留 Socket 应当被清理")
+	}
+	if _, err := os.Stat(residue); !os.IsNotExist(err) {
+		t.Error("清理后残留 Socket 文件应当不存在")
 	}
 }
 
