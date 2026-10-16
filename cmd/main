@@ -1,13 +1,17 @@
 #!/bin/bash
-# 路由器软件中心（fnOS 移植版）· 运行控制
+# unifi 软件中心（fnOS 移植版）· 运行控制
 #
 # 服务端是随包分发的静态编译二进制（<应用目录>/bin/unifi-center），
 # 目标机不需要任何运行时：没有 Python、没有 Node、也没有依赖应用。
 #
-# 关于路径：官方文档写 TRIM_APPDEST 是"已安装应用的 target 目录"，但**实测有设备把它指到
-# 应用根目录**（target 的上一级）。所以这里不假设 layout，而是列出候选、挑真正有
-# bin/unifi-center 的那个用；Socket 则严格跟着 TRIM_APPDEST 走（网关按它找 socket，
-# 放别处会导致桌面入口 502）。
+# 关于路径：
+#   · 应用文件目录：官方文档说 TRIM_APPDEST 是 target，但实测有设备给的是应用根目录。
+#     所以这里列候选、挑真正有 bin/unifi-center 的那个；Socket 严格跟着 TRIM_APPDEST
+#     （网关按它找 socket，放别处入口会 502）。
+#   · 配置目录：必须放在 **var/**（TRIM_PKGVAR）—— fnOS 卸载会删掉 etc/，
+#     只有 var/ 能活下来。早期版本写在 etc/，"卸载时保留配置"其实什么都没保住。
+#     解析顺序与 Go 侧 ResolveConfigDir 一致：var/ 有配置就用 var/，
+#     否则 etc/ 有配置就用 etc/（读回老版本留下的），都没有则用 var/。
 #
 # 退出码约定：status 运行返回 0、未运行返回 3；其它失败返回 1。
 
@@ -60,6 +64,22 @@ resolve_app_root() {
   printf '%s\n' "$APPDEST"
 }
 
+# 配置目录：与 Go 侧同一套规则（var/ 优先，并能读回 etc/ 里的老配置）
+resolve_config_dir() {
+  if [ -n "${UNIFICENTER_CONFIG_DIR:-}" ]; then
+    printf '%s\n' "$UNIFICENTER_CONFIG_DIR"
+    return 0
+  fi
+  local candidate
+  for candidate in "$PKGVAR" "$PKGETC"; do
+    if [ -f "$candidate/settings.json" ] || [ -f "$candidate/router-token" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' "$PKGVAR"
+}
+
 describe_layout() {
   local lines=""
   for candidate in $(app_candidates); do
@@ -108,12 +128,17 @@ case "${1:-}" in
     [ -S "$SOCKET" ] && rm -f "$SOCKET"
     rm -f "$PIDFILE"
 
+    CONFIG_DIR="$(resolve_config_dir)"
+    mkdir -p "$CONFIG_DIR" 2>/dev/null
+
     export TRIM_APPDEST="$APPDEST"
     export TRIM_PKGETC="$PKGETC"
     export TRIM_PKGVAR="$PKGVAR"
     export TRIM_PKGTMP="$PKGTMP"
     export TRIM_APPNAME="$APPNAME"
     export TRIM_TEMP_LOGFILE="${TRIM_TEMP_LOGFILE:-}"
+    # 明确告诉进程用哪个配置目录（与上面 shell 的判断一致，避免两边各写各的）
+    export UNIFICENTER_CONFIG_DIR="$CONFIG_DIR"
     [ -d "$APP_ROOT/ui" ] && export UI_DIR="$APP_ROOT/ui"
     export TERM=dumb
 
@@ -126,7 +151,7 @@ case "${1:-}" in
       rm -f "$PIDFILE"
       exit 1
     fi
-    echo "[unifi-center] 已启动（pid $(cat "$PIDFILE")，应用目录 $APP_ROOT，Socket $SOCKET）"
+    echo "[unifi-center] 已启动（pid $(cat "$PIDFILE")，应用目录 $APP_ROOT，配置 $CONFIG_DIR，Socket $SOCKET）"
     exit 0
     ;;
 
@@ -167,20 +192,31 @@ case "${1:-}" in
     ;;
 
   doctor)
-    # 排障用：把环境变量、候选布局、二进制与 Socket 状态全打出来
+    # 排障用：把环境变量、候选布局、配置目录、二进制与 Socket 状态全打出来
     echo "TRIM_APPNAME=$APPNAME"
     echo "TRIM_APPDEST=$APPDEST"
     echo "TRIM_PKGETC=$PKGETC"
     echo "TRIM_PKGVAR=$PKGVAR"
     echo "TRIM_PKGTMP=$PKGTMP"
     echo "解析出的应用目录：$(resolve_app_root)"
+    echo "解析出的配置目录：$(resolve_config_dir)"
+    if [ -f "$PKGVAR/settings.json" ] || [ -f "$PKGVAR/router-token" ]; then
+      echo "  var/ 里有配置：是"
+    else
+      echo "  var/ 里有配置：否"
+    fi
+    if [ -f "$PKGETC/settings.json" ] || [ -f "$PKGETC/router-token" ]; then
+      echo "  etc/ 里有配置：是"
+    else
+      echo "  etc/ 里有配置：否"
+    fi
     echo "Socket：$SOCKET"
     echo "候选布局：$(describe_layout)"
     echo "二进制：$(resolve_app_root)/bin/$BINARY_NAME"
     if pid="$(running_pid)"; then echo "进程：$pid"; else echo "进程：未运行"; fi
-    if [ -f "$PKGVAR/unifi-center.out" ]; then
+    if [ -f "$SERVICE_LOG" ]; then
       echo "--- 最近日志 ---"
-      tail -n 20 "$PKGVAR/unifi-center.out"
+      tail -n 20 "$SERVICE_LOG"
     fi
     exit 0
     ;;

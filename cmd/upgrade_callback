@@ -1,10 +1,14 @@
 #!/bin/bash
 # 升级后：迁移历史配置（幂等）并把服务重新拉起来。
+#
+# 迁移只在这里做（安装/配置向导不做）：把早期版本写在 etc/ 的配置、以及旧小米插件
+# 目录里的配置搬到 var/，这样"卸载选保留、重装读回"这条链路才成立。
 set -u
 
 APPNAME="${TRIM_APPNAME:-unificenter}"
 APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
 PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # 应用文件目录：TRIM_APPDEST 在不同设备上可能指向应用根目录或它的 target 子目录
@@ -13,11 +17,27 @@ for candidate in "$APPDEST" "$APPDEST/target" "/var/apps/$APPNAME/target" "/var/
   if [ -x "$candidate/bin/unifi-center" ]; then BIN="$candidate/bin/unifi-center"; break; fi
 done
 
-# 老版本（xiaomi-router-center 插件）把设置放在 /data/plugin/router-center/，
-# 若本应用还没有配置而那边有，就搬过来（只读旧目录，不删它）
-if [ -n "$BIN" ]; then
-  TRIM_PKGETC="$PKGETC" TRIM_APPDEST="$APPDEST" TRIM_APPNAME="$APPNAME" \
-    "$BIN" migrate-legacy >/dev/null 2>&1 || true
+CONFIG_DIR="$PKGVAR"
+if [ -n "${UNIFICENTER_CONFIG_DIR:-}" ]; then
+  CONFIG_DIR="$UNIFICENTER_CONFIG_DIR"
+fi
+mkdir -p "$CONFIG_DIR" 2>/dev/null
+
+# 1) 早期 fnOS 版本把配置写在 etc/：var/ 还没配置时搬过来（etc/ 卸载会被删）
+if [ ! -f "$CONFIG_DIR/settings.json" ] && [ ! -f "$CONFIG_DIR/router-token" ] \
+   && [ "$CONFIG_DIR" != "$PKGETC" ]; then
+  [ -f "$PKGETC/settings.json" ] && cp -p "$PKGETC/settings.json" "$CONFIG_DIR/" 2>/dev/null
+  if [ -f "$PKGETC/router-token" ]; then
+    cp -p "$PKGETC/router-token" "$CONFIG_DIR/" 2>/dev/null
+    chmod 600 "$CONFIG_DIR/router-token" 2>/dev/null
+  fi
+fi
+
+# 2) 旧的小米插件目录由二进制自己搬（只读旧目录，不删旧数据）
+if [ -x "$BIN" ]; then
+  TRIM_PKGETC="$PKGETC" TRIM_PKGVAR="$PKGVAR" TRIM_APPDEST="$APPDEST" \
+  TRIM_APPNAME="$APPNAME" UNIFICENTER_CONFIG_DIR="$CONFIG_DIR" \
+    "$BIN" seed --include-legacy >/dev/null 2>&1 || true
 fi
 
 "$DIR/main" start

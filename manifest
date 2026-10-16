@@ -1,5 +1,5 @@
 appname=unificenter
-version=1.0.0
+version=1.0.1
 display_name=unifi 软件中心
 desc=把局域网里路由器上的软件中心（UniFi SoftCenter / KoolCenter 类插件中心）搬进飞牛 fnOS：在 fnOS 桌面里直接打开它、装插件、看日志、改定时任务，不需要给路由器做任何端口映射。应用自带静态编译的服务端二进制，不依赖任何运行时。
 source=thirdparty
@@ -12,4 +12,4 @@ desktop_applaunchname=unificenter.main
 checkport=false
 disable_authorization_path=true
 ctl_stop=true
-changelog=1.0.0：首次发布。把小米智能存储上的 UniFi 路由器软件中心插件移植为飞牛 fnOS 应用（统一网关 + Unix Socket，NAS 登录态生效）。服务端为静态编译二进制，不依赖 Python/Node 等运行时。
+changelog=1.0.1：修复"卸载时选择保留配置、重新安装后却仍需重新输入"的问题 —— 配置与 AdminToken 改存在卸载时会保留的 var/ 目录（原先放在 etc/，而 etc/ 卸载时会被删除），并兼容读回老位置里的配置。1.0.0：首次发布。

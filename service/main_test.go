@@ -1162,7 +1162,8 @@ func TestGitHubProxy(t *testing.T) {
 func TestLoadEnv(t *testing.T) {
 	clear := func() {
 		for _, name := range []string{"TRIM_APPNAME", "TRIM_PKGETC", "TRIM_PKGVAR", "TRIM_APPDEST",
-			"UI_DIR", "SOCKET_PATH", "ROUTER_TARGET", "GATEWAY_PREFIX", "UNIFICENTER_DEV_PORT"} {
+			"UI_DIR", "SOCKET_PATH", "ROUTER_TARGET", "GATEWAY_PREFIX", "UNIFICENTER_DEV_PORT",
+			"UNIFICENTER_CONFIG_DIR"} {
 			_ = os.Unsetenv(name)
 		}
 	}
@@ -1173,8 +1174,9 @@ func TestLoadEnv(t *testing.T) {
 	t.Setenv("TRIM_PKGETC", "/vol1/@appconf/unificenter")
 	t.Setenv("TRIM_APPDEST", "/vol1/@appcenter/unificenter/target")
 	env := LoadEnv()
-	if env.ConfigDir != "/vol1/@appconf/unificenter" {
-		t.Errorf("ConfigDir = %q", env.ConfigDir)
+	// 新装：配置写到"卸载时会保留"的 var/（etc/ 卸载会被删，放那儿的"保留配置"没意义）
+	if want := filepath.Join("/var/apps/unificenter", "var"); env.ConfigDir != want {
+		t.Errorf("ConfigDir = %q，期望 %q", env.ConfigDir, want)
 	}
 	// 路径断言统一用 filepath.Join，避免 Windows/Linux 分隔符差异
 	wantUIDir := filepath.Join("/vol1/@appcenter/unificenter/target", "ui")
@@ -1193,6 +1195,68 @@ func TestLoadEnv(t *testing.T) {
 	}
 	if env.DefaultTarg != "http://192.168.1.1:9958/" {
 		t.Errorf("默认目标 = %q", env.DefaultTarg)
+	}
+}
+
+// 卸载时选"保留配置"、之后重新安装，必须还能读回老配置。
+//
+// 背景：fnOS 卸载会删掉 etc/（TRIM_PKGETC）、**保留 var/（TRIM_PKGVAR）**，
+// 早期版本把配置写在 etc/，于是"保留"什么也没留下 —— 重装后得重新输地址和令牌。
+func TestConfigSurvivesReinstall(t *testing.T) {
+	etc := t.TempDir()      // 模拟 TRIM_PKGETC：卸载后被删
+	varDir := t.TempDir()   // 模拟 TRIM_PKGVAR：卸载后保留
+	t.Setenv("TRIM_PKGETC", etc)
+	t.Setenv("TRIM_PKGVAR", varDir)
+	t.Setenv("TRIM_APPNAME", "unificenter")
+
+	// 第一次安装 + 用户填了地址与令牌 → 应当落在 var/
+	first := NewStore(ResolveConfigDir())
+	if first.ConfigDir != varDir {
+		t.Fatalf("新装配置目录 = %q，期望 var/（%q）", first.ConfigDir, varDir)
+	}
+	if _, err := first.SaveTarget("http://10.0.0.9:9958/", ""); err != nil {
+		t.Fatalf("写入地址失败：%v", err)
+	}
+	if err := first.SaveToken("kept-token-123456"); err != nil {
+		t.Fatalf("写入令牌失败：%v", err)
+	}
+
+	// 卸载：etc/ 被系统删掉，var/ 留下
+	if err := os.RemoveAll(etc); err != nil {
+		t.Fatalf("模拟卸载失败：%v", err)
+	}
+	if hasConfig(etc) {
+		t.Fatal("etc/ 已删除却仍被认为有配置")
+	}
+
+	// 重新安装：必须读回 var/ 里的老配置，而不是回落到默认值
+	second := NewStore(ResolveConfigDir())
+	if second.ConfigDir != varDir {
+		t.Fatalf("重装后配置目录 = %q，期望 %q", second.ConfigDir, varDir)
+	}
+	if got := second.Token(); got != "kept-token-123456" {
+		t.Errorf("重装后令牌 = %q，期望读回老令牌", got)
+	}
+	if got := second.LoadSettings("http://192.168.1.1:9958/"); got != "http://10.0.0.9:9958/" {
+		t.Errorf("重装后目标 = %q，期望读回老地址", got)
+	}
+
+	// 反向兼容：只在 etc/ 有配置（早期版本装的）时，也要能读出来
+	onlyEtcVar := t.TempDir()
+	emptyVar := t.TempDir()
+	t.Setenv("TRIM_PKGVAR", onlyEtcVar)
+	legacyStore := NewStore(onlyEtcVar)
+	if _, err := legacyStore.SaveTarget("http://192.168.1.50:9958/", ""); err != nil {
+		t.Fatalf("写入签名失败：%v", err)
+	}
+	t.Setenv("TRIM_PKGVAR", emptyVar)
+	t.Setenv("TRIM_PKGETC", onlyEtcVar)     // etc/ 有老配置、var/ 是空的
+	back := NewStore(ResolveConfigDir())
+	if back.ConfigDir != onlyEtcVar {
+		t.Errorf("应当读回 etc/ 里的老配置，实际选了 %q", back.ConfigDir)
+	}
+	if got := back.LoadSettings(""); got != "http://192.168.1.50:9958/" {
+		t.Errorf("老配置目标 = %q", got)
 	}
 }
 

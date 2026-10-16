@@ -30,7 +30,7 @@ import (
 
 const (
 	appNameDefault = "unificenter"
-	appVersion     = "1.0.0"
+	appVersion     = "1.0.1"
 	binaryName     = "unifi-center"
 	socketName     = "app.sock"
 
@@ -149,16 +149,86 @@ func ResolveAppDest() string {
 	return ""
 }
 
+// appVarDir 是"卸载时会被保留"的运行时数据目录（TRIM_PKGVAR）。
+// fnOS 卸载应用时删除 target/tmp/home/etc，**保留 var 与 shares** —— 所以用户数据
+// 必须放这里才有意义（放进 etc/ 的话，卸载时选"保留配置"其实什么也留不下）。
+func appVarDir() string {
+	if value := firstEnv("TRIM_PKGVAR"); value != "" {
+		return value
+	}
+	name := firstEnv("TRIM_APPNAME")
+	if name == "" {
+		name = appNameDefault
+	}
+	return filepath.Join("/var/apps", name, "var")
+}
+
+// legacyConfigDir 是旧版（小米插件版 / 早期 fnOS 版）放配置的地方，只读用于一次性迁移。
+func legacyConfigDir() string {
+	if value := firstEnv("LEGACY_PLUGIN_DIR"); value != "" {
+		return value
+	}
+	return "/data/plugin/router-center"
+}
+
+// ConfigCandidates 返回配置目录候选（按优先级）。挑选规则见 ResolveConfigDir。
+func ConfigCandidates() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	// 新版把配置放 var/（卸载保留、重装还在），etc/ 只作为兼容读取
+	if value := firstEnv("UNIFICENTER_CONFIG_DIR"); value != "" {
+		add(value)
+	}
+	add(appVarDir())
+	add(firstEnv("TRIM_PKGETC"))
+	add(legacyConfigDir())
+	return out
+}
+
+// hasConfig 判断目录里有没有本应用的配置（settings.json 或 router-token）。
+func hasConfig(dir string) bool {
+	for _, name := range []string{settingsFileName, tokenFileName} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveConfigDir 选一个配置目录：
+//  1. 候选里第一个**已经有配置**的（这样重装/升级都能直接读回老配置）；
+//  2. 都没有配置 → 用第一个候选（var/），也就是新写入的位置。
+//
+// 顺序是 var/ 优先、etc/ 次之：早期版本把配置写在 etc/，fnOS 卸载时会删掉 etc/，
+// 于是"保留配置"形同虚设；现在改放 var/，同时仍然能读回 etc/ 里的老配置。
+func ResolveConfigDir() string {
+	candidates := ConfigCandidates()
+	for _, candidate := range candidates {
+		if hasConfig(candidate) {
+			return candidate
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return ".dev/config"
+}
+
 // LoadEnv 按 fnOS 规范解析环境变量。
 func LoadEnv() Env {
 	appName := firstEnv("TRIM_APPNAME")
 	if appName == "" {
 		appName = appNameDefault
 	}
-	configDir := firstEnv("TRIM_PKGETC", "TRIM_PKGVAR")
-	if configDir == "" {
-		configDir = ".dev/config" // 开发机兜底
-	}
+	configDir := ResolveConfigDir()
 	appDest := firstEnv("TRIM_APPDEST")
 	appRoot := ResolveAppDest()
 	if appRoot == "" {

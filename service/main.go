@@ -38,7 +38,7 @@ func main() {
 		printStatus(env)
 		return
 	case "seed":
-		os.Exit(runSeed(env, false))
+		os.Exit(runSeed(env, parseIncludeLegacy(args)))
 	case "migrate-legacy":
 		os.Exit(runSeed(env, true))
 	case "selftest":
@@ -98,7 +98,19 @@ func printStatus(env Env) {
 	_ = encoder.Encode(payload)
 }
 
-// runSeed 把向导值落盘（幂等）；legacy 为真时改为从旧插件目录迁移。
+// parseIncludeLegacy 看 seed 的参数里有没有 --include-legacy。
+// 安装/配置向导不传（避免把别人留下的旧插件配置当成本应用的默认值），
+// 升级时传（那才是真的要从旧版迁移）。
+func parseIncludeLegacy(args []string) bool {
+	for _, arg := range args {
+		if arg == "--include-legacy" {
+			return true
+		}
+	}
+	return false
+}
+
+// runSeed 把向导值落盘（幂等）；legacy 为真时额外尝试从旧插件目录迁移。
 //
 // 向导字段是环境变量（不带 TRIM_ 前缀）：
 //
@@ -107,14 +119,17 @@ func printStatus(env Env) {
 func runSeed(env Env, legacy bool) int {
 	logger := NewLogger(filepath.Join(env.ConfigDir, logFileName))
 	store := NewStore(env.ConfigDir)
-	if legacy {
-		return migrateLegacy(store, logger)
-	}
 
 	rawTarget := strings.TrimSpace(os.Getenv("wizard_router_target"))
 	rawToken := strings.TrimSpace(os.Getenv("wizard_router_token"))
+
+	// 迁移（只在升级时做）：本应用还没有配置、而旧插件目录有，才搬过来
+	if legacy {
+		migrateLegacy(store, logger)
+	}
+
 	if rawTarget == "" && rawToken == "" {
-		logger.Printf("向导没有提供地址或令牌，保持现有配置不变")
+		logger.Printf("向导没有提供地址或令牌，保持现有配置不变（配置目录 %s）", store.ConfigDir)
 		return 0
 	}
 	if rawTarget != "" {
@@ -138,21 +153,18 @@ func runSeed(env Env, legacy bool) int {
 }
 
 // migrateLegacy 从旧的小米插件目录搬一次设置（本应用已有配置就不动）。
-func migrateLegacy(store *Store, logger *Logger) int {
-	if _, err := os.Stat(store.SettingsPath()); err == nil {
-		logger.Printf("本应用已有配置，跳过旧数据迁移")
-		return 0
+func migrateLegacy(store *Store, logger *Logger) {
+	if hasConfig(store.ConfigDir) {
+		logger.Printf("本应用已有配置，跳过旧数据迁移（%s）", store.ConfigDir)
+		return
 	}
-	legacyDir := strings.TrimSpace(os.Getenv("LEGACY_PLUGIN_DIR"))
-	if legacyDir == "" {
-		legacyDir = "/data/plugin/router-center"
-	}
-	legacySettings := filepath.Join(legacyDir, "settings.json")
-	legacyToken := filepath.Join(legacyDir, "router-token")
+	legacyDir := legacyConfigDir()
+	legacySettings := filepath.Join(legacyDir, settingsFileName)
+	legacyToken := filepath.Join(legacyDir, tokenFileName)
 	if _, err := os.Stat(legacySettings); err != nil {
 		if _, tokenErr := os.Stat(legacyToken); tokenErr != nil {
 			logger.Printf("没有找到可迁移的旧插件配置（%s）", legacyDir)
-			return 0
+			return
 		}
 	}
 	if data, err := os.ReadFile(legacySettings); err == nil {
@@ -171,7 +183,6 @@ func migrateLegacy(store *Store, logger *Logger) int {
 		}
 	}
 	logger.Printf("已从旧插件目录迁移设置：%s（旧目录保持不动）", legacyDir)
-	return 0
 }
 
 // runSelfTest 是不需要网络的启动自检：路径能不能解析、目录可写、UI 资源齐全。

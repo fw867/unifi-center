@@ -5,31 +5,41 @@ set -u
 APPNAME="${TRIM_APPNAME:-unificenter}"
 APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
 PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
 LOGFILE="${TRIM_TEMP_LOGFILE:-/dev/null}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# 应用文件目录：TRIM_APPDEST 在不同设备上可能指向应用根目录或它的 target 子目录，
-# 所以逐个候选看哪个真有二进制（与 cmd/main 的解析规则保持一致）。
+# 应用文件目录：TRIM_APPDEST 在不同设备上可能指向应用根目录或它的 target 子目录
 BIN=""
 for candidate in "$APPDEST" "$APPDEST/target" "/var/apps/$APPNAME/target" "/var/apps/$APPNAME"; do
   if [ -x "$candidate/bin/unifi-center" ]; then BIN="$candidate/bin/unifi-center"; break; fi
 done
 
-mkdir -p "$PKGETC" || { echo "无法写入应用配置目录：$PKGETC" > "$LOGFILE"; exit 1; }
+# 配置目录：与 cmd/main、Go 侧同一套规则（var/ 优先，兼容读回 etc/ 里的老配置）
+CONFIG_DIR="$PKGVAR"
+if [ -n "${UNIFICENTER_CONFIG_DIR:-}" ]; then
+  CONFIG_DIR="$UNIFICENTER_CONFIG_DIR"
+elif [ ! -f "$PKGVAR/settings.json" ] && [ ! -f "$PKGVAR/router-token" ]; then
+  if [ -f "$PKGETC/settings.json" ] || [ -f "$PKGETC/router-token" ]; then
+    CONFIG_DIR="$PKGETC"
+  fi
+fi
+
+mkdir -p "$CONFIG_DIR" || { echo "无法写入配置目录：$CONFIG_DIR" > "$LOGFILE"; exit 1; }
 
 if [ -n "$BIN" ]; then
   TRIM_PKGETC="$PKGETC" \
+  TRIM_PKGVAR="$PKGVAR" \
   TRIM_APPDEST="$APPDEST" \
   TRIM_APPNAME="$APPNAME" \
   TRIM_TEMP_LOGFILE="${TRIM_TEMP_LOGFILE:-}" \
+  UNIFICENTER_CONFIG_DIR="$CONFIG_DIR" \
   wizard_router_target="${wizard_router_target:-}" \
   wizard_router_token="${wizard_router_token:-}" \
   "$BIN" seed || {
     echo "配置写入失败：请检查地址格式（示例 http://192.168.1.1:9958/）与存储空间是否可写" > "$LOGFILE"
     exit 1
   }
-else
-  echo "[unifi-center] 未找到可执行文件，跳过配置写入" >&2
 fi
 
 "$DIR/main" stop >/dev/null 2>&1

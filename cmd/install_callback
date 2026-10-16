@@ -1,5 +1,8 @@
 #!/bin/bash
-# 安装文件之后：把安装向导里填的地址 / 令牌写进应用配置目录（可重复执行）。
+# 安装文件之后：把安装向导里填的地址 / 令牌写进**卸载时会被保留的 var/**（可重复执行）。
+#
+# 为什么是 var/：fnOS 卸载会删除 target/tmp/home/etc、保留 var/ 与 shares。
+# 早期版本把配置写在 etc/，用户卸载时选"保留配置"其实什么都没保住，重装还得重输。
 #
 # 向导字段会以同名环境变量提供给本脚本（不带 TRIM_ 前缀）：
 #   wizard_router_target  路由器软件中心地址，例如 http://192.168.1.1:9958/
@@ -9,6 +12,7 @@ set -u
 APPNAME="${TRIM_APPNAME:-unificenter}"
 APPDEST="${TRIM_APPDEST:-/var/apps/$APPNAME/target}"
 PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
 LOGFILE="${TRIM_TEMP_LOGFILE:-/dev/null}"
 
 # 应用文件目录：TRIM_APPDEST 在不同设备上可能指向应用根目录或它的 target 子目录
@@ -17,8 +21,19 @@ for candidate in "$APPDEST" "$APPDEST/target" "/var/apps/$APPNAME/target" "/var/
   if [ -x "$candidate/bin/unifi-center" ]; then BIN="$candidate/bin/unifi-center"; break; fi
 done
 
-mkdir -p "$PKGETC" || { echo "无法创建配置目录：$PKGETC" > "$LOGFILE"; exit 1; }
-chmod 700 "$PKGETC" 2>/dev/null
+# 配置目录：var/ 里已有配置就继续用 var/；否则若 etc/ 有老配置（早期版本装的）就沿用；
+# 都没有则用 var/（新的写入位置）。与 Go 侧 ResolveConfigDir 一致。
+CONFIG_DIR="$PKGVAR"
+if [ -n "${UNIFICENTER_CONFIG_DIR:-}" ]; then
+  CONFIG_DIR="$UNIFICENTER_CONFIG_DIR"
+elif [ ! -f "$PKGVAR/settings.json" ] && [ ! -f "$PKGVAR/router-token" ]; then
+  if [ -f "$PKGETC/settings.json" ] || [ -f "$PKGETC/router-token" ]; then
+    CONFIG_DIR="$PKGETC"
+  fi
+fi
+
+mkdir -p "$CONFIG_DIR" || { echo "无法创建配置目录：$CONFIG_DIR" > "$LOGFILE"; exit 1; }
+chmod 700 "$CONFIG_DIR" 2>/dev/null
 
 if [ -z "$BIN" ]; then
   # 没有二进制不算致命：服务起不来时 cmd/main 会给出明确提示
@@ -27,9 +42,11 @@ if [ -z "$BIN" ]; then
 fi
 
 TRIM_PKGETC="$PKGETC" \
+TRIM_PKGVAR="$PKGVAR" \
 TRIM_APPDEST="$APPDEST" \
 TRIM_APPNAME="$APPNAME" \
 TRIM_TEMP_LOGFILE="${TRIM_TEMP_LOGFILE:-}" \
+UNIFICENTER_CONFIG_DIR="$CONFIG_DIR" \
 wizard_router_target="${wizard_router_target:-}" \
 wizard_router_token="${wizard_router_token:-}" \
 "$BIN" seed || {

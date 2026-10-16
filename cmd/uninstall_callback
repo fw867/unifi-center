@@ -3,19 +3,33 @@
 #
 #   wizard_purge_data=purge → 删除；其它值（含未提供）→ 保留。
 #
-# 只碰本应用自己的配置目录，不动路由器、不动共享目录、不动其它应用的数据。
+# 配置现在放在 **var/**（TRIM_PKGVAR）—— fnOS 卸载会删掉 etc/、保留 var/，
+# 所以"保留"要落在 var/ 才有意义。早期版本写在 etc/ 的副本顺手清掉（它本来也会被系统删，
+# 留着还会让下次解析配置目录时误判成"etc/ 里有配置"）。
+# 只碰本应用自己的目录，不动路由器、不动共享目录、不动其它应用的数据。
 set -u
 
 APPNAME="${TRIM_APPNAME:-unificenter}"
 PKGETC="${TRIM_PKGETC:-/var/apps/$APPNAME/etc}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/$APPNAME/var}"
+
+purge_dir() {
+  rm -f "$1/settings.json" "$1/router-token" "$1/unifi-center.log"* 2>/dev/null
+}
 
 case "${wizard_purge_data:-keep}" in
   purge)
-    rm -f "$PKGETC/settings.json" "$PKGETC/router-token" "$PKGETC/unifi-center.log"* 2>/dev/null
+    purge_dir "$PKGVAR"
+    purge_dir "$PKGETC"
     echo "[unifi-center] 已按选择删除 NAS 上保存的设置与 AdminToken"
     ;;
   *)
-    echo "[unifi-center] 已保留 NAS 上保存的设置与 AdminToken（重装后可直接复用）"
+    purge_dir "$PKGETC"
+    if [ -f "$PKGVAR/settings.json" ] || [ -f "$PKGVAR/router-token" ]; then
+      echo "[unifi-center] 已保留 NAS 上保存的设置与 AdminToken（位于 $PKGVAR，重新安装后自动读回）"
+    else
+      echo "[unifi-center] 没有需要保留的设置或 AdminToken"
+    fi
     ;;
 esac
 exit 0

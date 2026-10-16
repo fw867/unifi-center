@@ -311,6 +311,56 @@ CODE="$(curl -sS --unix-socket "$SOCKET2" -o "$WORK/body2" -w '%{http_code}' htt
 check "根目录布局下 /healthz = 200" "$([ "$CODE" = "200" ] && echo 1 || echo 0)" "$CODE"
 run2 stop >/dev/null 2>&1 || true
 
+echo "卸载时选\"保留配置\"、重新安装后要能读回老配置"
+# fnOS 卸载会删掉 etc/、保留 var/ —— 所以"保留"必须落在 var/
+PKGVAR2="$WORK/var2"
+PKGETC2="$WORK/etc2"
+mkdir -p "$PKGVAR2" "$PKGETC2"
+SOCKET3="$ROOT2/app.sock"
+run3() { # run3 <cmd/main 参数...>
+  TRIM_APPNAME=unificenter TRIM_APPDEST="$ROOT2" TRIM_PKGETC="$PKGETC2" \
+  TRIM_PKGVAR="$PKGVAR2" TRIM_PKGTMP="$WORK/tmp" TRIM_TEMP_LOGFILE="$WORK/tmp/err3.log" \
+  ROUTER_TARGET="http://127.0.0.1:$ROUTER_PORT/" GITHUB_API_BASE="http://127.0.0.1:$ROUTER_PORT" \
+  "$WORK/fpk/cmd/main" "$@"
+}
+
+# 1) 首次安装：用向导值写入（模拟用户在安装向导里填了地址与令牌）
+if TRIM_APPNAME=unificenter TRIM_APPDEST="$ROOT2" TRIM_PKGETC="$PKGETC2" TRIM_PKGVAR="$PKGVAR2" \
+   wizard_router_target="http://127.0.0.1:$ROUTER_PORT/" wizard_router_token="kept-token-abcdef" \
+   "$WORK/fpk/cmd/install_callback" >/dev/null 2>&1; then
+  check "install_callback 写配置成功" 1
+else
+  check "install_callback 写配置成功" 0 "$(head -c 200 "$WORK/tmp/err3.log" 2>/dev/null)"
+fi
+[ -f "$PKGVAR2/router-token" ] && check "令牌落在 var/（卸载会保留的目录）" 1 \
+  || check "令牌落在 var/（卸载会保留的目录）" 0
+[ -f "$PKGETC2/router-token" ] && check "etc/ 里不应有令牌（卸载会被删）" 0 \
+  || check "etc/ 里不应有令牌（卸载会被删）" 1
+
+# 2) 卸载选"保留" → 跑 uninstall_callback，然后删掉 etc/（模拟系统的清理）
+TRIM_APPNAME=unificenter TRIM_APPDEST="$ROOT2" TRIM_PKGETC="$PKGETC2" TRIM_PKGVAR="$PKGVAR2" \
+  wizard_purge_data=keep "$WORK/fpk/cmd/uninstall_callback" >/dev/null 2>&1 || true
+rm -rf "$PKGETC2"
+[ -f "$PKGVAR2/router-token" ] && check "选保留后令牌仍在 var/" 1 || check "选保留后令牌仍在 var/" 0
+
+# 3) 重新安装后启动：必须读回老配置，而不是回落到默认值/空令牌
+if run3 start >"$WORK/start3.log" 2>&1; then
+  check "重装后 cmd/main start" 1
+else
+  check "重装后 cmd/main start" 0 "$(cat "$WORK/start3.log" "$WORK/tmp/err3.log" 2>/dev/null | head -c 300)"
+fi
+for _ in $(seq 1 50); do [ -S "$SOCKET3" ] && break; sleep 0.1; done
+CODE="$(curl -sS --unix-socket "$SOCKET3" -o "$WORK/body3" -w '%{http_code}' \
+        -H 'X-Trim-Userid: 1000' -H 'X-Trim-Username: admin' -H 'X-Trim-Isadmin: true' \
+        http://localhost/ctl/settings 2>/dev/null || echo 000)"
+check "重装后接口可用" "$([ "$CODE" = "200" ] && echo 1 || echo 0)" "$CODE"
+grep -q 'kept-token-abcdef' "$WORK/body3" \
+  && check "重装后读回老令牌（不用重新输入）" 1 \
+  || check "重装后读回老令牌（不用重新输入）" 0 "$(head -c 200 "$WORK/body3")"
+grep -q "127.0.0.1:$ROUTER_PORT" "$WORK/body3" \
+  && check "重装后读回老地址" 1 || check "重装后读回老地址" 0
+run3 stop >/dev/null 2>&1 || true
+
 printf '\n通过 %d 项，失败 %d 项\n' "$PASS" "$FAIL"
 [ "$FAIL" = "0" ] || { echo '冒烟失败'; exit 1; }
 echo '全部冒烟检查通过 ✓'

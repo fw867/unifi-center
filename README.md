@@ -255,12 +255,40 @@ python3 tools/make_icon.py . --radius 0.18     # 换个圆角比例
 | 控制台电脑端那一跳的占位值 `Bearer console-loopback` | 本应用保存的令牌 |
 | 完全没带 | 本应用保存的令牌；没保存就不带（软件中心照实报 401，日志里写清该去哪填） |
 
+## 配置保存在哪（卸载/重装/升级）
+
+官方文档写明：**卸载应用时 fnOS 会删除 `target`/`tmp`/`home`/`etc`，保留 `var` 与 `shares`**。
+所以设置（目标地址）与 AdminToken 一律放在 **`$TRIM_PKGVAR`**：
+
+| 文件 | 位置 | 权限 |
+| --- | --- | --- |
+| `settings.json`（目标地址） | `$TRIM_PKGVAR/settings.json` | 0644 |
+| `router-token`（AdminToken） | `$TRIM_PKGVAR/router-token` | 0600 |
+| 服务日志 | `$TRIM_PKGVAR/unifi-center.log`（轮转 1 份） | 0600 |
+
+解析顺序（Go 侧 `ResolveConfigDir`、shell 侧 `resolve_config_dir`，两边同一套规则）：
+
+1. `UNIFICENTER_CONFIG_DIR`（`cmd/main` 启动时会显式传给进程，保证脚本与进程用同一个目录）；
+2. `$TRIM_PKGVAR` —— 只要里面有 `settings.json` 或 `router-token` 就用它；
+3. `$TRIM_PKGETC` —— 早期版本（1.0.0）把配置写在这里，能读回；
+4. 都没有 → 用 `$TRIM_PKGVAR`（新的写入位置）。
+
+于是：
+
+- **升级**（1.0.0 → 1.0.1）：`cmd/upgrade_callback` 会把 `etc/` 里的老配置搬进 `var/`
+  （并顺带搬旧小米插件目录的配置），老用户不用重输；
+- **卸载选"保留配置"**：`cmd/uninstall_callback` 只清 `etc/` 副本，`var/` 原样留下；
+- **重新安装**：服务启动时按上面的顺序解析，直接读回 `var/` 里的老地址与令牌。
+
+用 `cmd/main doctor` 可以一眼看到当前解析到哪个目录、`var/` 与 `etc/` 里各有没有配置。
+
 ## 安全
 
 - 应用的运行身份是 fnOS 包用户（`config/privilege` 里 `run-as=package`），不是 root；
 - 这个界面能在路由器上装包、重启服务 ⇒ 请给 AdminToken 用强随机值，并且**不要**给路由器的
   软件中心端口做公网映射（本方案的价值就是不需要）；
-- AdminToken 存在 `$TRIM_PKGETC/router-token`（0600），配置目录 0700，写入走"临时文件 + rename"；
+- AdminToken 存在 **`$TRIM_PKGVAR/router-token`**（0600，`var/` 是卸载时会保留的目录），
+  配置目录 0700，写入走"临时文件 + rename"；
 - 明文令牌的可见性：**只有经网关登录的管理员**（`X-Trim-Isadmin: true`）能通过
   `/ctl/settings` 与 `/ctl/token` 读到；其它入口只回 `token_hint`（例如 `a1b2…z9`），
   响应体里不会出现明文；页面注入不受影响（那是服务自己读文件写进页面 localStorage 的）；
