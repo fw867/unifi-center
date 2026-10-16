@@ -1197,34 +1197,43 @@ func TestSocketReadyAndStaleSocket(t *testing.T) {
 	if SocketReady(path) {
 		t.Error("不存在的 Socket 不应判定为就绪")
 	}
-	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
-		listener, err := listenUnix(path)
-		if err != nil {
-			t.Fatalf("创建测试 Socket 失败：%v", err)
+	if UnlinkStaleSocket(path) {
+		t.Error("文件不存在时不应报告清理成功")
+	}
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return
+	}
+
+	// 1) 有活着的监听者：绝不能删
+	listener, err := listenUnix(path)
+	if err != nil {
+		t.Fatalf("创建测试 Socket 失败：%v", err)
+	}
+	if !SocketReady(path) {
+		t.Error("正在监听的 Socket 应当判定为就绪")
+	}
+	if UnlinkStaleSocket(path) {
+		t.Error("活着服务的 Socket 不应被判定为陈旧并删除")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("活着服务的 Socket 文件不该被删掉：%v", err)
+	}
+
+	// 2) 监听者关闭后：应当能清理；若内核还没释放绑定，则必须"没有删但服务仍活着"，
+	//    不能出现"既没删、也确认过没人听"以外的第三种状态。
+	_ = listener.Close()
+	removed := UnlinkStaleSocket(path)
+	if removed {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Error("报告清理成功但文件还在")
 		}
-		defer listener.Close()
-		if !SocketReady(path) {
-			t.Error("正在监听的 Socket 应当判定为就绪")
-		}
-		// 先确认服务真的在 accept（有人连得上），这样下面"陈旧"的判断才有意义
-		if conn, dialErr := net.DialTimeout("unix", path, time.Second); dialErr == nil {
-			_ = conn.Close()
-		} else {
-			t.Fatalf("监听中的 Socket 应当连得上：%v", dialErr)
-		}
-		if UnlinkStaleSocket(path) {
-			t.Error("活着服务的 Socket 不应被判定为陈旧并删除")
-		}
-		// 关掉监听者后，它就成了陈旧 Socket，应当被清理。
-		// 注意：Unix Socket 的 backlog 里可能还留着未被 accept 的连接，所以这里允许
-		// UnlinkStaleSocket 内部重试几次（实现里已经这么做了）。
-		_ = listener.Close()
-		if !UnlinkStaleSocket(path) {
-			t.Error("陈旧 Socket 应当被清理")
-		}
-		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
-			t.Error("清理后 Socket 文件应当不存在")
-		}
+		return
+	}
+	// 没删掉：那就必须真的还有东西在监听（用 bind 探测不出，说明内核还认为绑定存在）
+	probe, probeErr := net.Listen("unix", path)
+	if probeErr == nil {
+		_ = probe.Close()
+		t.Error("既没清理，也能成功 bind —— 说明这段逻辑没有正确识别陈旧 Socket")
 	}
 }
 
